@@ -12,6 +12,19 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+# Keep-alive function
+def keep_alive():
+    while True:
+        try:
+            requests.get(f"{RENDER_URL}/webhook")
+            print("Pinged self to stay awake")
+        except Exception as e:
+            print(f"Keep-alive failed: {e}")
+        threading.Event().wait(600)  # Wait 10 minutes
+
+# Start keep-alive in a separate thread
+threading.Thread(target=keep_alive, daemon=True).start()
+
 # Telegram Bot Token (set via environment variable)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
