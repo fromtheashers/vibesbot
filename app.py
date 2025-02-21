@@ -98,7 +98,6 @@ application = Application.builder().token(TOKEN).build()
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Log the incoming message text
     logger.debug("In start handler, received message: %s", update.message.text if update.message else "None")
     if update.message:
         await update.message.reply_text(WELCOME_TEXT)
@@ -350,7 +349,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Add the ConversationHandler to the Telegram Application
+# Add the ConversationHandler to the Telegram Application without per_message=True
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
@@ -369,8 +368,7 @@ conv_handler = ConversationHandler(
         ASK_NEW_VALUE: [CallbackQueryHandler(ask_new_value)],
         CONFIRM_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_edit)],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 application.add_handler(conv_handler)
 
