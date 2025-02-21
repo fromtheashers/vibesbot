@@ -21,13 +21,17 @@ app = Quart(__name__)
 # Environment variables using os.environ.get
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 RENDER_URL = os.environ.get("RENDER_URL", "http://localhost:5000")
+SHEET_ID = os.environ.get("SHEET_ID")
 
+# Validate required environment variables
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
+if not SHEET_ID:
+    logger.error("SHEET_ID is not set. Bot cannot start.")
+    raise ValueError("SHEET_ID environment variable is required.")
 
 # Google Sheets Setup
-SHEET_ID = os.environ.get("SHEET_ID")  # Replace with your SHEET_ID
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Conversation States
@@ -58,12 +62,14 @@ def append_row(values):
     url = f"{BASE_URL}/Sheet1!A1:G1:append?valueInputOption=RAW"
     response = requests.post(url, json={"values": [values]})
     if response.status_code != 200:
+        logger.error(f"Failed to append row: {response.text}")
         raise Exception(f"Failed to append row: {response.text}")
 
 def get_all_values():
     url = f"{BASE_URL}/Sheet1!A:G"
     response = requests.get(url)
     if response.status_code != 200:
+        logger.error(f"Failed to get data: {response.text}")
         raise Exception(f"Failed to get data: {response.text}")
     data = response.json().get("values", [])
     return data
@@ -72,50 +78,39 @@ def update_cell(row, col, value):
     url = f"{BASE_URL}/Sheet1!{chr(64 + col)}{row}"
     response = requests.put(url, json={"values": [[value]]}, params={"valueInputOption": "RAW"})
     if response.status_code != 200:
+        logger.error(f"Failed to update cell: {response.text}")
         raise Exception(f"Failed to update cell: {response.text}")
 
-# Build and initialize the Application
+# Build the Application
 application = Application.builder().token(TOKEN).build()
-
-# Synchronous initialization at startup
-async def initialize_app():
-    try:
-        await application.initialize()
-        logger.info("Application initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {e}")
-        raise
-
-# Run initialization synchronously before starting the server
-logger.info("Initializing application...")
-asyncio.run(initialize_app())
-
-# Error handler for Quart
-@app.errorhandler(Exception)
-async def handle_exception(e):
-    logger.error(f"Unhandled exception: {e}")
-    return "Internal Server Error", 500
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Start handler triggered for user %s", update.message.from_user.id)
     await update.message.reply_text(WELCOME_TEXT)
-    logger.info("Received /start command from user %s", update.message.from_user.id)
+    logger.info("Sent welcome text to user %s", update.message.from_user.id)
     return ASK_PASSWORD
 
 async def ask_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Ask_password handler triggered for user %s with text: %s",
+                update.message.from_user.id, update.message.text)
     if update.message.text == "vibes":
         await update.message.reply_text(
             "Access granted! What would you like to do?",
             reply_markup=InlineKeyboardMarkup(MAIN_MENU)
         )
+        logger.info("Main menu sent to user %s", update.message.from_user.id)
         return ConversationHandler.END
     else:
         await update.message.reply_text("Incorrect password. Please try again.")
+        logger.info("Incorrect password response sent to user %s", update.message.from_user.id)
         return ASK_PASSWORD
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info("Button handler triggered for user %s with data: %s",
+                query.from_user.id, query.data)
     if query.data == "input":
         await query.edit_message_text("Please enter the name of the place:")
         return ASK_NAME
@@ -303,21 +298,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Webhook endpoint
-@app.route('/webhook', methods=['POST'])
-async def webhook():
-    logger.info("Webhook received a request")
-    update_json = await request.get_json()
-    logger.info(f"Raw update JSON: {json.dumps(update_json)}")
-    update = Update.de_json(update_json, application.bot)
-    await application.process_update(update)
-    return '', 200
-
-@app.route('/')
-async def home():
-    return "Bot is running"
-
-# Add handlers after initialization
+# Add handlers before initialization
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
@@ -340,6 +321,39 @@ conv_handler = ConversationHandler(
     per_message=True  # Ensure CallbackQueryHandler tracks every message
 )
 application.add_handler(conv_handler)
+
+# Synchronous initialization at startup
+async def initialize_app():
+    try:
+        await application.initialize()
+        logger.info("Application initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize application: {e}")
+        raise
+
+# Run initialization synchronously before starting the server
+logger.info("Initializing application...")
+asyncio.run(initialize_app())
+
+# Error handler for Quart
+@app.errorhandler(Exception)
+async def handle_exception(e):
+    logger.error(f"Unhandled exception: {e}")
+    return "Internal Server Error", 500
+
+# Webhook endpoint
+@app.route('/webhook', methods=['POST'])
+async def webhook():
+    logger.info("Webhook received a request")
+    update_json = await request.get_json()
+    logger.info(f"Raw update JSON: {json.dumps(update_json)}")
+    update = Update.de_json(update_json, application.bot)
+    await application.process_update(update)
+    return '', 200
+
+@app.route('/')
+async def home():
+    return "Bot is running"
 
 if __name__ == "__main__":
     logger.info("Starting the application")
