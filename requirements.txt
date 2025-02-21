@@ -5,4 +5,5 @@ gunicorn
 gspread
 requests
 quart
+hypercorn
 

@@ -19,7 +19,7 @@ app = Quart(__name__)
 
 # Environment variables using os.environ.get
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
-RENDER_URL = os.environ.get("RENDER_URL", "http://localhost:5000")  # Fallback for local testing
+RENDER_URL = os.environ.get("RENDER_URL", "http://localhost:5000")
 
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
