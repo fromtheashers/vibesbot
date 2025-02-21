@@ -12,8 +12,8 @@ from telegram.ext import (
 )
 from datetime import datetime
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging with DEBUG level for more detail
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Quart(__name__)
@@ -86,14 +86,14 @@ application = Application.builder().token(TOKEN).build()
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Start handler triggered for user %s", update.message.from_user.id)
+    logger.debug("Start handler triggered for user %s", update.message.from_user.id)
     await update.message.reply_text(WELCOME_TEXT)
     logger.info("Sent welcome text to user %s", update.message.from_user.id)
     return ASK_PASSWORD
 
 async def ask_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Ask_password handler triggered for user %s with text: %s",
-                update.message.from_user.id, update.message.text)
+    logger.debug("Ask_password handler triggered for user %s with text: %s",
+                 update.message.from_user.id, update.message.text)
     if update.message.text == "vibes":
         await update.message.reply_text(
             "Access granted! What would you like to do?",
@@ -109,8 +109,8 @@ async def ask_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    logger.info("Button handler triggered for user %s with data: %s",
-                query.from_user.id, query.data)
+    logger.debug("Button handler triggered for user %s with data: %s",
+                 query.from_user.id, query.data)
     if query.data == "input":
         await query.edit_message_text("Please enter the name of the place:")
         return ASK_NAME
@@ -322,8 +322,9 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-# Synchronous initialization at startup
-async def initialize_app():
+# Asynchronous startup function
+async def startup():
+    logger.info("Initializing application...")
     try:
         await application.initialize()
         logger.info("Application initialized successfully")
@@ -331,9 +332,11 @@ async def initialize_app():
         logger.error(f"Failed to initialize application: {e}")
         raise
 
-# Run initialization synchronously before starting the server
-logger.info("Initializing application...")
-asyncio.run(initialize_app())
+# Override Quart's run method to include startup
+async def run_with_startup():
+    await startup()
+    logger.info("Starting the application")
+    await app.run_task(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 # Error handler for Quart
 @app.errorhandler(Exception)
@@ -348,7 +351,9 @@ async def webhook():
     update_json = await request.get_json()
     logger.info(f"Raw update JSON: {json.dumps(update_json)}")
     update = Update.de_json(update_json, application.bot)
+    logger.debug("Processing update: %s", update.update_id)
     await application.process_update(update)
+    logger.debug("Update processed: %s", update.update_id)
     return '', 200
 
 @app.route('/')
@@ -356,5 +361,4 @@ async def home():
     return "Bot is running"
 
 if __name__ == "__main__":
-    logger.info("Starting the application")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    asyncio.run(run_with_startup())
