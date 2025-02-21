@@ -13,21 +13,29 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Keep-alive function
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Telegram Bot Token and Render URL from environment variables
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+RENDER_URL = os.getenv("RENDER_URL", "http://localhost:5000")  # Fallback for local testing
+
+# Keep-alive function with error handling
 def keep_alive():
+    if not RENDER_URL:
+        logger.error("RENDER_URL is not set. Keep-alive will not run.")
+        return
     while True:
         try:
-            requests.get(f"{RENDER_URL}/webhook")
-            print("Pinged self to stay awake")
+            response = requests.get(f"{RENDER_URL}/webhook")
+            logger.info(f"Keep-alive ping successful: {response.status_code}")
         except Exception as e:
-            print(f"Keep-alive failed: {e}")
+            logger.error(f"Keep-alive failed: {e}")
         threading.Event().wait(600)  # Wait 10 minutes
 
 # Start keep-alive in a separate thread
 threading.Thread(target=keep_alive, daemon=True).start()
-
-# Telegram Bot Token (set via environment variable)
-TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Google Sheets Setup (Publicly editable sheet, no credentials)
 SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
