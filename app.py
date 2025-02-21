@@ -22,14 +22,19 @@ app = Quart(__name__)
 # Environment variables
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SHEET_ID = os.environ.get("SHEET_ID")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
 if not SHEET_ID:
     logger.error("SHEET_ID is not set. Bot cannot start.")
     raise ValueError("SHEET_ID environment variable is required.")
+if not GOOGLE_API_KEY:
+    logger.error("GOOGLE_API_KEY is not set. Bot cannot start.")
+    raise ValueError("GOOGLE_API_KEY environment variable is required.")
 
-# Google Sheets Setup (public sheet)
+# Google Sheets Setup (public sheet, but API key is required)
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Conversation States
@@ -63,9 +68,9 @@ def col_to_letter(n):
         result = chr(65 + remainder) + result
     return result
 
-# Asynchronous helper functions for Google Sheets API
+# Asynchronous helper functions for Google Sheets API with API key authentication
 async def append_row(values):
-    url = f"{BASE_URL}/Sheet1!A1:G1:append?valueInputOption=RAW"
+    url = f"{BASE_URL}/Sheet1!A1:G1:append?valueInputOption=RAW&key={GOOGLE_API_KEY}"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json={"values": [values]}) as response:
             if response.status != 200:
@@ -74,7 +79,7 @@ async def append_row(values):
                 raise Exception(f"Failed to append row: {text}")
 
 async def get_all_values():
-    url = f"{BASE_URL}/Sheet1!A:G"
+    url = f"{BASE_URL}/Sheet1!A:G?key={GOOGLE_API_KEY}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             if response.status != 200:
@@ -85,7 +90,7 @@ async def get_all_values():
             return data.get("values", [])
 
 async def update_cell(row, col, value):
-    url = f"{BASE_URL}/Sheet1!{col_to_letter(col)}{row}"
+    url = f"{BASE_URL}/Sheet1!{col_to_letter(col)}{row}?key={GOOGLE_API_KEY}"
     async with aiohttp.ClientSession() as session:
         async with session.put(url, json={"values": [[value]]}, params={"valueInputOption": "RAW"}) as response:
             if response.status != 200:
