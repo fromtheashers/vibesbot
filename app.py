@@ -2,14 +2,12 @@ import os
 import re
 import json
 import requests
-import threading
 import logging
-import asyncio
-from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup  # Updated import
+from quart import Quart, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    ConversationHandler, MessageHandler, ContextTypes, filters
+    Application, CommandHandler, ConversationHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters
 )
 from datetime import datetime
 
@@ -17,57 +15,42 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Start the event loop in a separate thread
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-threading.Thread(target=loop.run_forever, daemon=True).start()
+app = Quart(__name__)
 
-app = Flask(__name__)
-
-YOUR_CHAT_ID = 29612237  # Replace with your actual chat_id
-
-# Log environment variables at startup
-logger.info("Starting app...")
-logger.info(f"TELEGRAM_TOKEN: {os.getenv('TELEGRAM_TOKEN')}")
-logger.info(f"RENDER_URL: {os.getenv('RENDER_URL')}")
-
-# Telegram Bot Token and Render URL from environment variables
-TOKEN = os.environ.get('TELEGRAM_TOKEN')
-RENDER_URL = os.environ.get('RENDER_URL', "http://localhost:5000")  # Fallback for local testing
+# Environment variables using os.environ.get
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+RENDER_URL = os.environ.get("RENDER_URL", "http://localhost:5000")  # Fallback for local testing
 
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
 
-# Create and set the event loop
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-
-# Initialize the Application with the correct loop
-application = Application.builder().token(TOKEN).build()
-
-# Start the event loop in a separate thread
-threading.Thread(target=loop.run_forever, daemon=True).start()
-
 # Google Sheets Setup
-SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
+SHEET_ID = "your_spreadsheet_id_here"  # Replace with your SHEET_ID
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
-# Keep-alive function with error handling
-def keep_alive():
-    if not RENDER_URL:
-        logger.error("RENDER_URL is not set. Keep-alive will not run.")
-        return
-    while True:
-        try:
-            response = requests.get(f"{RENDER_URL}/webhook")
-            logger.info(f"Keep-alive ping successful: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Keep-alive failed: {e}")
-        threading.Event().wait(600)  # Wait 10 minutes
+# Conversation States
+(ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
+ ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
+ ASK_FIELD_TO_EDIT, ASK_NEW_VALUE, CONFIRM_EDIT) = range(15)
 
-# Start keep-alive in a separate thread
-threading.Thread(target=keep_alive, daemon=True).start()
+# Inline Keyboards
+SCORE_BUTTONS = [[InlineKeyboardButton(str(i), callback_data=str(i)) for i in range(1, 6)]]
+VIBE_BUTTONS = [
+    [InlineKeyboardButton("Good", callback_data="good"),
+     InlineKeyboardButton("Bad", callback_data="bad")]
+]
+MAIN_MENU = [
+    [InlineKeyboardButton("Input Vibe Data", callback_data="input")],
+    [InlineKeyboardButton("Edit Vibe Data", callback_data="edit")],
+    [InlineKeyboardButton("View Current Rankings", callback_data="rankings")]
+]
+
+WELCOME_TEXT = (
+    "Welcome to GoodVibesBot! 🎉\n"
+    "This bot helps you track and analyze vibes from different places.\n\n"
+    "Please enter the password to proceed."
+)
 
 # Helper functions for Google Sheets API
 def append_row(values):
@@ -90,38 +73,13 @@ def update_cell(row, col, value):
     if response.status_code != 200:
         raise Exception(f"Failed to update cell: {response.text}")
 
-# Conversation States
-(ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
- ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
- ASK_FIELD_TO_EDIT, ASK_NEW_VALUE, CONFIRM_EDIT) = range(15)
-
-# Inline Keyboards
-SCORE_BUTTONS = [[InlineKeyboardButton(str(i), callback_data=str(i)) for i in range(1, 6)]]
-VIBE_BUTTONS = [
-    [InlineKeyboardButton("Good", callback_data="good"),
-     InlineKeyboardButton("Bad", callback_data="bad")]
-]
-
-MAIN_MENU = [
-        [InlineKeyboardButton("Input Vibe Data", callback_data="input")],
-        [InlineKeyboardButton("Edit Vibe Data", callback_data="edit")],
-        [InlineKeyboardButton("View Current Rankings", callback_data="rankings")]
-    ]
-
-WELCOME_TEXT = (
-    "Welcome to GoodVibesBot! 🎉\n"
-    "This bot helps you track and analyze vibes from different places.\n\n"
-    "Please enter the password to proceed."
-)
-
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Prompt the user for the password
     await update.message.reply_text(WELCOME_TEXT)
     logger.info("Received /start command from user %s", update.message.from_user.id)
     return ASK_PASSWORD
 
 async def ask_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Validate the password
     if update.message.text == "vibes":
         await update.message.reply_text(
             "Access granted! What would you like to do?",
@@ -145,7 +103,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_rankings(update, context)
         return ConversationHandler.END
 
-# Input Vibe Data Flow
 async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["vibe_data"] = {}
     context.user_data["vibe_data"]["name"] = update.message.text
@@ -226,7 +183,6 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Edit Vibe Data Flow
 async def ask_name_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["edit_data"] = {"name": update.message.text}
     await update.message.reply_text("Enter the date (DD/MM/YYYY) to identify the entry:")
@@ -296,7 +252,6 @@ async def confirm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Rankings
 async def show_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_data = get_all_values()[1:]  # Skip header
     good_vibes = [row for row in all_data if row[6] == "good"]
@@ -325,23 +280,26 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Flask Webhook
+# Webhook endpoint
 @app.route('/webhook', methods=['POST'])
-def webhook():
+async def webhook():
     logger.info("Webhook received a request")
-    update_json = request.get_json(force=True)
-    logger.debug(f"Incoming update: {json.dumps(update_json)}")
+    update_json = await request.get_json()
+    logger.info(f"Raw update JSON: {json.dumps(update_json)}")
     update = Update.de_json(update_json, application.bot)
-    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
+    await application.process_update(update)
     return '', 200
 
 @app.route('/')
-def home():
+async def home():
     return "Bot is running"
 
+# Build the Application and add handlers
+application = Application.builder().token(TOKEN).build()
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
+        ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_password)],
         ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
         ASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date)],
         ASK_FOOD: [CallbackQueryHandler(ask_food)],
@@ -359,15 +317,6 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel)]
 )
 application.add_handler(conv_handler)
-
-async def send_startup_message():
-    try:
-        await application.bot.send_message(chat_id=YOUR_CHAT_ID, text="Bot started successfully")
-        logger.info("Startup message sent")
-    except Exception as e:
-        logger.error(f"Failed to send startup message: {e}")
-
-asyncio.run_coroutine_threadsafe(send_startup_message(), loop)
 
 if __name__ == "__main__":
     logger.info("Starting the application")
