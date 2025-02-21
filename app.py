@@ -3,6 +3,7 @@ import re
 import json
 import requests
 import logging
+import asyncio
 from quart import Quart, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -26,7 +27,7 @@ if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
 
 # Google Sheets Setup
-SHEET_ID = "your_spreadsheet_id_here"  # Replace with your SHEET_ID
+SHEET_ID = os.environ.get("SHEET_ID")  # Replace with your SHEET_ID
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Conversation States
@@ -76,8 +77,7 @@ def update_cell(row, col, value):
 # Build the Application
 application = Application.builder().token(TOKEN).build()
 
-# Initialize the Application before the first request
-@app.before_first_request
+# Initialize the Application at startup
 async def initialize_app():
     try:
         await application.initialize()
@@ -85,6 +85,10 @@ async def initialize_app():
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}")
         raise
+
+# Start initialization as a task
+loop = asyncio.get_event_loop()
+loop.create_task(initialize_app())
 
 # Error handler for Quart
 @app.errorhandler(Exception)

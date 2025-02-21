@@ -4,6 +4,6 @@ pygsheets
 gunicorn
 gspread
 requests
-quart
+quart>=0.18.0
 hypercorn
 
