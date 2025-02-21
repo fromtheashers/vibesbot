@@ -320,6 +320,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def webhook():
     logger.info("Webhook received a request")
     update = Update.de_json(request.get_json(force=True), application.bot)  # Fixed import
+    update_json = request.get_json(force=True)  # Get the raw JSON from Telegram
+    logger.debug(f"Incoming update: {json.dumps(update_json)}")  # Log the JSON, serialized for safety
     asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     return "OK"
 
