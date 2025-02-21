@@ -23,7 +23,7 @@ app = Quart(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SHEET_ID = os.environ.get("SHEET_ID")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-SELF_PING_URL = os.environ.get("SELF_PING_URL")  # e.g. "https://<your-app>.onrender.com/"
+SELF_PING_URL = os.environ.get("SELF_PING_URL")  # e.g. "https://your-app.onrender.com/"
 
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
@@ -35,24 +35,29 @@ if not GOOGLE_API_KEY:
     logger.error("GOOGLE_API_KEY is not set. Bot cannot start.")
     raise ValueError("GOOGLE_API_KEY environment variable is required.")
 
-# Google Sheets Setup (public sheet; API key is required)
+# Google Sheets API base URL (public sheet; API key required)
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Conversation States
-(ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
- ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
- ASK_NEW_VALUE, CONFIRM_EDIT) = range(14)
+# States for new record input: 0-8, then:
+# 9: SELECT_RECORD_EDIT – list records for editing and wait for selection (by number)
+# 10: SHOW_CURRENT_DATA – ask which field to edit
+# 11: ASK_NEW_VALUE – wait for new value via callback (score/vibe)
+# 12: CONFIRM_EDIT – confirm update
+# 13: SELECT_RECORD_DELETE – list records for deletion and wait for selection (by number)
+# 14: CONFIRM_DELETE – confirm deletion
+(ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO, ASK_VIBE, CONFIRM,
+ SELECT_RECORD_EDIT, SHOW_CURRENT_DATA, ASK_NEW_VALUE, CONFIRM_EDIT, SELECT_RECORD_DELETE, CONFIRM_DELETE) = range(15)
 
 # Inline Keyboards
 SCORE_BUTTONS = [[InlineKeyboardButton(str(i), callback_data=str(i)) for i in range(1, 6)]]
-VIBE_BUTTONS = [
-    [InlineKeyboardButton("Good", callback_data="good"),
-     InlineKeyboardButton("Bad", callback_data="bad")]
-]
+VIBE_BUTTONS = [[InlineKeyboardButton("Good", callback_data="good"),
+                 InlineKeyboardButton("Bad", callback_data="bad")]]
 MAIN_MENU = [
     [InlineKeyboardButton("Input Vibe Data", callback_data="input")],
     [InlineKeyboardButton("Edit Vibe Data", callback_data="edit")],
-    [InlineKeyboardButton("View Current Rankings", callback_data="rankings")]
+    [InlineKeyboardButton("View Current Rankings", callback_data="rankings")],
+    [InlineKeyboardButton("Delete Vibe Data", callback_data="delete")]
 ]
 
 WELCOME_TEXT = (
@@ -61,7 +66,7 @@ WELCOME_TEXT = (
     "Please enter the password to proceed."
 )
 
-# Helper: convert a column number to an Excel-style letter
+# Helper function: convert a column number to an Excel-style letter
 def col_to_letter(n):
     result = ""
     while n > 0:
@@ -69,7 +74,7 @@ def col_to_letter(n):
         result = chr(65 + remainder) + result
     return result
 
-# Google Sheets API helper functions (using API key)
+# --- Google Sheets API Helper Functions ---
 async def append_row(values):
     url = f"{BASE_URL}/Sheet1!A1:G1:append?valueInputOption=RAW&key={GOOGLE_API_KEY}"
     async with aiohttp.ClientSession() as session:
@@ -99,10 +104,43 @@ async def update_cell(row, col, value):
                 logger.error(f"Failed to update cell: {text}")
                 raise Exception(f"Failed to update cell: {text}")
 
-# Build the Telegram Application
-application = Application.builder().token(TOKEN).build()
+async def delete_row(row_index):
+    # Clear the specified row range
+    range_str = f"Sheet1!A{row_index}:G{row_index}"
+    url = f"{BASE_URL}/{range_str}:clear?key={GOOGLE_API_KEY}"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url) as response:
+            if response.status != 200:
+                text = await response.text()
+                logger.error(f"Failed to delete row {row_index}: {text}")
+                raise Exception(f"Failed to delete row {row_index}: {text}")
 
-# Handlers
+# --- New Helper: List records formatted with auto-counter ---
+async def list_records_formatted():
+    data = await get_all_values()
+    records = data[1:] if len(data) > 1 else []
+    valid_records = []
+    for sheet_index, row in enumerate(records, start=2):
+        try:
+            # Parse the date in row[1] ("DD/MM/YYYY")
+            d = datetime.strptime(row[1], "%d/%m/%Y")
+            valid_records.append((sheet_index, row, d))
+        except Exception as e:
+            continue
+    valid_records.sort(key=lambda x: x[2], reverse=True)
+    if not valid_records:
+        return "No records found.", {}
+    lines = []
+    mapping = {}  # counter -> { "index": sheet_index, "data": row }
+    for counter, (sheet_index, row, d) in enumerate(valid_records, start=1):
+        mapping[counter] = {"index": sheet_index, "data": row}
+        # Format: "1. Name | Date | Place | Food: ..., Spaciousness: ..., Convo: ..., Vibe: ..."
+        line = f"{counter}. {row[0]} | {row[1]} | {row[3]} | Food: {row[2]}, Spaciousness: {row[4]}, Convo: {row[5]}, Vibe: {row[6]}"
+        lines.append(line)
+    formatted = "\n".join(lines)
+    return formatted, mapping
+
+# --- Bot Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.debug("In start handler, received message: %s", update.message.text if update.message else "None")
     if update.message:
@@ -133,8 +171,25 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Please enter the name of the place:")
         return ASK_NAME
     elif query.data == "edit":
-        await query.edit_message_text("Enter the name of the place to edit:")
-        return ASK_NAME_FOR_EDIT
+        # List records for editing
+        text, mapping = await list_records_formatted()
+        if mapping:
+            context.user_data["record_list_edit"] = mapping
+            await query.edit_message_text("Select a record to edit by sending its number:\n" + text)
+            return SELECT_RECORD_EDIT
+        else:
+            await query.edit_message_text("No records found.")
+            return ConversationHandler.END
+    elif query.data == "delete":
+        # List records for deletion
+        text, mapping = await list_records_formatted()
+        if mapping:
+            context.user_data["record_list_delete"] = mapping
+            await query.edit_message_text("Select a record to delete by sending its number:\n" + text)
+            return SELECT_RECORD_DELETE
+        else:
+            await query.edit_message_text("No records found.")
+            return ConversationHandler.END
     elif query.data == "rankings":
         await show_rankings(update, context)
         return ConversationHandler.END
@@ -156,13 +211,6 @@ async def ask_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["vibe_data"]["date"] = date_text
     await update.message.reply_text("Score for Food (1-5):", reply_markup=InlineKeyboardMarkup(SCORE_BUTTONS))
     return ASK_FOOD
-
-def is_valid_date(date_str):
-    try:
-        datetime.strptime(date_str, "%d/%m/%Y")
-        return True
-    except ValueError:
-        return False
 
 async def ask_food(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -238,48 +286,56 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-async def ask_name_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["edit_data"] = {"name": update.message.text}
-    await update.message.reply_text("Enter the date (DD/MM/YYYY) to identify the entry:")
-    return ASK_DATE_FOR_EDIT
-
-async def ask_date_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    date_text = update.message.text
-    if not re.match(r"^\d{2}/\d{2}/\d{4}$", date_text) or not is_valid_date(date_text):
-        await update.message.reply_text("Invalid format or date. Please use DD/MM/YYYY:")
-        return ASK_DATE_FOR_EDIT
-    context.user_data["edit_data"]["date"] = date_text
-    row = await find_row(context.user_data["edit_data"]["name"], date_text)
-    if row:
-        context.user_data["edit_row"] = row
-        formatted = format_row(row)
-        await update.message.reply_text(
-            f"Current data:\n{formatted}\nWhich field to edit? (Food, Place, Spaciousness, Convo, Vibe):"
-        )
-        return SHOW_CURRENT_DATA
-    else:
-        await update.message.reply_text("Entry not found.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
-        return ConversationHandler.END
-
-async def find_row(name, date):
-    all_data = await get_all_values()
-    for i, row in enumerate(all_data[1:], start=2):
-        if len(row) >= 2 and row[0] == name and row[1] == date:
-            return {"index": i, "data": row}
-    return None
-
-def format_row(row):
+# --- New Handlers for Editing via Record Selection ---
+async def select_record_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        data = row.get("data", [])
-        if len(data) < 7:
-            return "Data is incomplete."
-        return (f"Name: {data[0]}\nDate: {data[1]}\nFood: {data[2]}\n"
-                f"Place: {data[3]}\nSpaciousness: {data[4]}\nConvo: {data[5]}\n"
-                f"Vibe: {data[6]}")
-    except Exception as e:
-        logger.error("Error formatting row: %s", e)
-        return "Error formatting row."
+        choice = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("Invalid selection. Please enter a number.")
+        return SELECT_RECORD_EDIT
+    mapping = context.user_data.get("record_list_edit", {})
+    if choice not in mapping:
+        await update.message.reply_text("Selection out of range. Please enter a valid number.")
+        return SELECT_RECORD_EDIT
+    context.user_data["selected_record_edit"] = mapping[choice]
+    record = mapping[choice]["data"]
+    formatted = (f"Name: {record[0]}\nDate: {record[1]}\nFood: {record[2]}\n"
+                 f"Place: {record[3]}\nSpaciousness: {record[4]}\nConvo: {record[5]}\nVibe: {record[6]}")
+    await update.message.reply_text(f"You selected:\n{formatted}\nWhich field do you want to edit? (Food, Place, Spaciousness, Convo, Vibe)")
+    return SHOW_CURRENT_DATA
 
+# --- New Handlers for Deletion via Record Selection ---
+async def select_record_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        choice = int(update.message.text.strip())
+    except ValueError:
+        await update.message.reply_text("Invalid selection. Please enter a number.")
+        return SELECT_RECORD_DELETE
+    mapping = context.user_data.get("record_list_delete", {})
+    if choice not in mapping:
+        await update.message.reply_text("Selection out of range. Please enter a valid number.")
+        return SELECT_RECORD_DELETE
+    context.user_data["selected_record_delete"] = mapping[choice]
+    record = mapping[choice]["data"]
+    formatted = (f"Name: {record[0]}\nDate: {record[1]}\nFood: {record[2]}\n"
+                 f"Place: {record[3]}\nSpaciousness: {record[4]}\nConvo: {record[5]}\nVibe: {record[6]}")
+    await update.message.reply_text(f"You selected:\n{formatted}\nAre you sure you want to delete this record? (yes/no)")
+    return CONFIRM_DELETE
+
+async def confirm_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() == "yes":
+        record = context.user_data.get("selected_record_delete")
+        if record:
+            await delete_row(record["index"])
+            await update.message.reply_text("Record deleted.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
+        else:
+            await update.message.reply_text("Error: Record not found.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
+    else:
+        await update.message.reply_text("Deletion canceled.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# --- Existing Handlers for Editing Continued (unchanged from previous flow) ---
 async def show_current_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = update.message.text.lower()
     context.user_data["field_to_edit"] = field
@@ -304,15 +360,15 @@ async def ask_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def confirm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() == "yes":
-        row = context.user_data.get("edit_row")
+        record = context.user_data.get("selected_record_edit")
         field = context.user_data.get("field_to_edit")
         new_value = context.user_data.get("new_value")
         col_map = {"food": 3, "place": 4, "spaciousness": 5, "convo": 6, "vibe": 7}
-        if field in col_map and row:
-            await update_cell(row["index"], col_map[field], new_value)
+        if field in col_map and record:
+            await update_cell(record["index"], col_map[field], new_value)
             await update.message.reply_text("Data updated!", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
         else:
-            await update.message.reply_text("Error: Invalid field or row data.")
+            await update.message.reply_text("Error: Invalid field or record data.")
     else:
         await update.message.reply_text("Edit canceled.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
     context.user_data.clear()
@@ -325,9 +381,9 @@ async def show_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.callback_query:
             await update.callback_query.edit_message_text("Error retrieving data.")
         return
-    all_data = all_data[1:]
-    good_vibes = [row for row in all_data if len(row) >= 7 and row[6].lower() == "good"]
-    bad_vibes = [row for row in all_data if len(row) >= 7 and row[6].lower() == "bad"]
+    records = all_data[1:]
+    good_vibes = [row for row in records if len(row) >= 7 and row[6].lower() == "good"]
+    bad_vibes = [row for row in records if len(row) >= 7 and row[6].lower() == "bad"]
     if not good_vibes or not bad_vibes:
         if update.callback_query:
             await update.callback_query.edit_message_text("Not enough data for rankings.")
@@ -355,32 +411,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Add the ConversationHandler to the Telegram Application without per_message=True
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
-    states={
-        ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_password)],
-        ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
-        ASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date)],
-        ASK_FOOD: [CallbackQueryHandler(ask_food)],
-        ASK_PLACE: [CallbackQueryHandler(ask_place)],
-        ASK_SPACIOUSNESS: [CallbackQueryHandler(ask_spaciousness)],
-        ASK_CONVO: [CallbackQueryHandler(ask_convo)],
-        ASK_VIBE: [CallbackQueryHandler(ask_vibe)],
-        CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm)],
-        ASK_NAME_FOR_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name_for_edit)],
-        ASK_DATE_FOR_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date_for_edit)],
-        SHOW_CURRENT_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, show_current_data)],
-        ASK_NEW_VALUE: [CallbackQueryHandler(ask_new_value)],
-        CONFIRM_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_edit)],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)]
-)
-application.add_handler(conv_handler)
-
-# Self-pinging background task to keep the instance awake
+# --- Self-Pinging Background Task ---
 async def self_ping():
-    # Use SELF_PING_URL if set, else default to localhost (this might not work if the instance is spun down)
     url = SELF_PING_URL or f"http://localhost:{os.environ.get('PORT', 5000)}/"
     logger.info("Starting self-ping on URL: %s", url)
     while True:
@@ -393,7 +425,34 @@ async def self_ping():
             logger.error("Self-ping failed: %s", e)
         await asyncio.sleep(300)  # Ping every 5 minutes
 
-# Quart startup hook: Initialize the Telegram Application, start self-pinging, and log bot details
+# --- Conversation Handler Setup ---
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
+    states={
+        # For new record input
+        ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_password)],
+        ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
+        ASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date)],
+        ASK_FOOD: [CallbackQueryHandler(ask_food)],
+        ASK_PLACE: [CallbackQueryHandler(ask_place)],
+        ASK_SPACIOUSNESS: [CallbackQueryHandler(ask_spaciousness)],
+        ASK_CONVO: [CallbackQueryHandler(ask_convo)],
+        ASK_VIBE: [CallbackQueryHandler(ask_vibe)],
+        CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm)],
+        # For editing (record selection and update)
+        SELECT_RECORD_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_record_edit)],
+        SHOW_CURRENT_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, show_current_data)],
+        ASK_NEW_VALUE: [CallbackQueryHandler(ask_new_value)],
+        CONFIRM_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_edit)],
+        # For deletion (record selection and confirmation)
+        SELECT_RECORD_DELETE: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_record_delete)],
+        CONFIRM_DELETE: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_delete)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)]
+)
+application.add_handler(conv_handler)
+
+# --- Quart Startup Hook ---
 @app.before_serving
 async def startup():
     await application.initialize()
@@ -401,7 +460,7 @@ async def startup():
     logger.info("Telegram Application initialized. Bot info: %s", bot_me)
     app.add_background_task(self_ping)
 
-# Webhook endpoint for Telegram updates
+# --- Webhook Endpoint ---
 @app.route('/webhook', methods=['POST'])
 async def webhook():
     logger.info("Webhook received a request")
