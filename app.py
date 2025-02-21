@@ -19,12 +19,9 @@ logger = logging.getLogger(__name__)
 
 app = Quart(__name__)
 
-# Environment variables using os.environ.get
+# Environment variables
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
-RENDER_URL = os.environ.get("RENDER_URL", "http://localhost:5000")
 SHEET_ID = os.environ.get("SHEET_ID")
-
-# Validate required environment variables
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
@@ -32,10 +29,10 @@ if not SHEET_ID:
     logger.error("SHEET_ID is not set. Bot cannot start.")
     raise ValueError("SHEET_ID environment variable is required.")
 
-# Google Sheets Setup (public sheet, so no auth is added)
+# Google Sheets Setup (public sheet)
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
-# Conversation States (unused state removed)
+# Conversation States
 (ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
  ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
  ASK_NEW_VALUE, CONFIRM_EDIT) = range(14)
@@ -58,7 +55,7 @@ WELCOME_TEXT = (
     "Please enter the password to proceed."
 )
 
-# Helper function to convert column number to Excel column letter (supports >26)
+# Helper function: convert a column number to an Excel-style letter
 def col_to_letter(n):
     result = ""
     while n > 0:
@@ -101,39 +98,32 @@ application = Application.builder().token(TOKEN).build()
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id if update.message else "unknown"
-    logger.debug("Start handler triggered for user %s", user_id)
+    # Log the incoming message text
+    logger.debug("In start handler, received message: %s", update.message.text if update.message else "None")
     if update.message:
         await update.message.reply_text(WELCOME_TEXT)
-        logger.info("Sent welcome text to user %s", user_id)
+        logger.info("Sent welcome text to user %s", update.message.from_user.id)
     return ASK_PASSWORD
 
 async def ask_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id if update.message else "unknown"
     text = update.message.text if update.message else ""
-    logger.debug("ask_password triggered for user %s with text: %s", user_id, text)
+    logger.debug("In ask_password, received: %s", text)
     if text == "vibes":
         if update.message:
-            await update.message.reply_text(
-                "Access granted! What would you like to do?",
-                reply_markup=InlineKeyboardMarkup(MAIN_MENU)
-            )
-        logger.info("Main menu sent to user %s", user_id)
+            await update.message.reply_text("Access granted! What would you like to do?",
+                                              reply_markup=InlineKeyboardMarkup(MAIN_MENU))
         return ConversationHandler.END
     else:
         if update.message:
             await update.message.reply_text("Incorrect password. Please try again.")
-        logger.info("Incorrect password response sent to user %s", user_id)
         return ASK_PASSWORD
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
-        logger.error("button handler received update without callback_query")
+        logger.error("Button handler received update without callback_query")
         return ConversationHandler.END
     await query.answer()
-    logger.debug("Button handler triggered for user %s with data: %s",
-                 query.from_user.id, query.data)
     if query.data == "input":
         await query.edit_message_text("Please enter the name of the place:")
         return ASK_NAME
@@ -148,18 +138,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("ask_name expects a text message.")
-        return ConversationHandler.END
     context.user_data["vibe_data"] = {}
     context.user_data["vibe_data"]["name"] = update.message.text
     await update.message.reply_text("Enter the date (DD/MM/YYYY):")
     return ASK_DATE
 
 async def ask_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("ask_date expects a text message.")
-        return ConversationHandler.END
     date_text = update.message.text
     if not re.match(r"^\d{2}/\d{2}/\d{4}$", date_text) or not is_valid_date(date_text):
         await update.message.reply_text("Invalid format or date. Please use DD/MM/YYYY:")
@@ -176,9 +160,6 @@ def is_valid_date(date_str):
         return False
 
 async def ask_food(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query:
-        logger.error("ask_food expects a callback query.")
-        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     try:
@@ -190,9 +171,6 @@ async def ask_food(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_PLACE
 
 async def ask_place(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query:
-        logger.error("ask_place expects a callback query.")
-        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     try:
@@ -204,9 +182,6 @@ async def ask_place(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_SPACIOUSNESS
 
 async def ask_spaciousness(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query:
-        logger.error("ask_spaciousness expects a callback query.")
-        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     try:
@@ -218,9 +193,6 @@ async def ask_spaciousness(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_CONVO
 
 async def ask_convo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query:
-        logger.error("ask_convo expects a callback query.")
-        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     try:
@@ -232,9 +204,6 @@ async def ask_convo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_VIBE
 
 async def ask_vibe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query:
-        logger.error("ask_vibe expects a callback query.")
-        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     context.user_data["vibe_data"]["vibe"] = query.data
@@ -254,9 +223,6 @@ async def ask_vibe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONFIRM
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("confirm expects a text message.")
-        return ConversationHandler.END
     if update.message.text.lower() == "yes":
         data = context.user_data.get("vibe_data", {})
         await append_row([data.get("name"), data.get("date"), data.get("food"), data.get("place"),
@@ -268,17 +234,11 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def ask_name_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("ask_name_for_edit expects a text message.")
-        return ConversationHandler.END
     context.user_data["edit_data"] = {"name": update.message.text}
     await update.message.reply_text("Enter the date (DD/MM/YYYY) to identify the entry:")
     return ASK_DATE_FOR_EDIT
 
 async def ask_date_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("ask_date_for_edit expects a text message.")
-        return ConversationHandler.END
     date_text = update.message.text
     if not re.match(r"^\d{2}/\d{2}/\d{4}$", date_text) or not is_valid_date(date_text):
         await update.message.reply_text("Invalid format or date. Please use DD/MM/YYYY:")
@@ -298,7 +258,6 @@ async def ask_date_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def find_row(name, date):
     all_data = await get_all_values()
-    # Skip header row and check that row data is complete
     for i, row in enumerate(all_data[1:], start=2):
         if len(row) >= 2 and row[0] == name and row[1] == date:
             return {"index": i, "data": row}
@@ -317,9 +276,6 @@ def format_row(row):
         return "Error formatting row."
 
 async def show_current_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("show_current_data expects a text message.")
-        return ConversationHandler.END
     field = update.message.text.lower()
     context.user_data["field_to_edit"] = field
     if field in ["food", "place", "spaciousness", "convo"]:
@@ -334,9 +290,6 @@ async def show_current_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SHOW_CURRENT_DATA
 
 async def ask_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query:
-        logger.error("ask_new_value expects a callback query.")
-        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     context.user_data["new_value"] = query.data
@@ -345,9 +298,6 @@ async def ask_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONFIRM_EDIT
 
 async def confirm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        logger.error("confirm_edit expects a text message.")
-        return ConversationHandler.END
     if update.message.text.lower() == "yes":
         row = context.user_data.get("edit_row")
         field = context.user_data.get("field_to_edit")
@@ -367,30 +317,24 @@ async def show_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         all_data = await get_all_values()
     except Exception as e:
-        logger.error("Error retrieving data for rankings: %s", e)
         if update.callback_query:
             await update.callback_query.edit_message_text("Error retrieving data.")
         return
-    # Skip header row
     all_data = all_data[1:]
     good_vibes = [row for row in all_data if len(row) >= 7 and row[6].lower() == "good"]
     bad_vibes = [row for row in all_data if len(row) >= 7 and row[6].lower() == "bad"]
-
     if not good_vibes or not bad_vibes:
         if update.callback_query:
             await update.callback_query.edit_message_text("Not enough data for rankings.")
         return
-
     attrs = {"food": 2, "place": 3, "spaciousness": 4, "convo": 5}
     try:
         good_avg = {attr: sum(int(row[col]) for row in good_vibes) / len(good_vibes) for attr, col in attrs.items()}
         bad_avg = {attr: sum(int(row[col]) for row in bad_vibes) / len(bad_vibes) for attr, col in attrs.items()}
     except Exception as e:
-        logger.error("Error calculating averages: %s", e)
         if update.callback_query:
             await update.callback_query.edit_message_text("Error calculating averages.")
         return
-
     diffs = {attr: good_avg[attr] - bad_avg[attr] for attr in attrs}
     ranking = sorted(diffs.items(), key=lambda x: x[1], reverse=True)
     ranking_text = "Ranking of attributes for good vibes:\n" + "\n".join(
@@ -398,17 +342,15 @@ async def show_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     good_avg_text = "Good vibes averages:\n" + "\n".join(f"- {k.capitalize()}: {v:.2f}" for k, v in good_avg.items())
     bad_avg_text = "Bad vibes averages:\n" + "\n".join(f"- {k.capitalize()}: {v:.2f}" for k, v in bad_avg.items())
-
     if update.callback_query:
         await update.callback_query.edit_message_text(f"{ranking_text}\n\n{good_avg_text}\n\n{bad_avg_text}")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:
-        await update.message.reply_text("Operation canceled.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
+    await update.message.reply_text("Operation canceled.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
     context.user_data.clear()
     return ConversationHandler.END
 
-# Add conversation handler to Telegram Application
+# Add the ConversationHandler to the Telegram Application
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
@@ -432,18 +374,19 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-# Quart startup hook: Initialize the Telegram Application before serving requests
+# Quart startup hook: Initialize the Telegram Application and log bot details
 @app.before_serving
 async def init_telegram_app():
     await application.initialize()
-    logger.info("Telegram Application initialized successfully via Quart startup.")
+    bot_me = await application.bot.get_me()
+    logger.info("Telegram Application initialized. Bot info: %s", bot_me)
 
 # Webhook endpoint for Telegram updates
 @app.route('/webhook', methods=['POST'])
 async def webhook():
     logger.info("Webhook received a request")
     update_json = await request.get_json()
-    logger.info(f"Raw update JSON: {json.dumps(update_json)}")
+    logger.info("Raw update JSON: %s", json.dumps(update_json))
     update = Update.de_json(update_json, application.bot)
     logger.debug("Processing update: %s", update.update_id)
     await application.process_update(update)
@@ -454,7 +397,5 @@ async def webhook():
 async def home():
     return "Bot is running"
 
-# For local development, you can run the Quart app with:
 if __name__ == "__main__":
-    # Running on port 5000 by default, change if needed
     asyncio.run(app.run_task(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))))
