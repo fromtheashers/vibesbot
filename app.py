@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import asyncio
 import logging
 import threading
 import requests
@@ -11,6 +12,11 @@ from telegram.ext import (
     ConversationHandler, MessageHandler, ContextTypes, filters
 )
 from datetime import datetime
+
+# Start the event loop in a separate thread
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+threading.Thread(target=loop.run_forever, daemon=True).start()
 
 app = Flask(__name__)
 
@@ -98,6 +104,7 @@ WELCOME_TEXT = (
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Prompt the user for the password
     await update.message.reply_text(WELCOME_TEXT)
+    logger.info("Received /start command from user %s", update.message.from_user.id)
     return ASK_PASSWORD
 
 async def ask_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -308,9 +315,15 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Flask Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    application.process_update(update)
+    logger.info("Webhook received a request")
+    update = telegram.Update.de_json(request.get_json(force=True), application.bot)
+    asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     return "OK"
+
+# testing
+@app.route('/')
+def home():
+    return "Bot is running"
 
 # Bot Application
 application = Application.builder().token(TOKEN).build()
