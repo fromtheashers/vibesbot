@@ -18,9 +18,18 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Log environment variables at startup
+logger.info("Starting app...")
+logger.info(f"TELEGRAM_TOKEN: {os.getenv('TELEGRAM_TOKEN')}")
+logger.info(f"RENDER_URL: {os.getenv('RENDER_URL')}")
+
 # Telegram Bot Token and Render URL from environment variables
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 RENDER_URL = os.getenv("RENDER_URL", "http://localhost:5000")  # Fallback for local testing
+
+if not TOKEN:
+    logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
+    raise ValueError("TELEGRAM_TOKEN environment variable is required.")
 
 # Keep-alive function with error handling
 def keep_alive():
