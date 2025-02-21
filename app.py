@@ -318,25 +318,22 @@ conv_handler = ConversationHandler(
         CONFIRM_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_edit)],
     },
     fallbacks=[CommandHandler("cancel", cancel)],
-    per_message=True  # Ensure CallbackQueryHandler tracks every message
+    per_message=True
 )
 application.add_handler(conv_handler)
 
-# Asynchronous startup function
-async def startup():
-    logger.info("Initializing application...")
-    try:
-        await application.initialize()
-        logger.info("Application initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {e}")
-        raise
-
-# Override Quart's run method to include startup
-async def run_with_startup():
-    await startup()
-    logger.info("Starting the application")
-    await app.run_task(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+# Synchronous initialization at module scope
+logger.info("Initializing application at module scope...")
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+try:
+    loop.run_until_complete(application.initialize())
+    logger.info("Application initialized successfully at module scope")
+except Exception as e:
+    logger.error(f"Failed to initialize application at module scope: {e}")
+    raise
+finally:
+    loop.close()
 
 # Error handler for Quart
 @app.errorhandler(Exception)
@@ -361,4 +358,5 @@ async def home():
     return "Bot is running"
 
 if __name__ == "__main__":
-    asyncio.run(run_with_startup())
+    logger.info("Starting the application")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
