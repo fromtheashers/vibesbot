@@ -2,3 +2,4 @@ flask
 python-telegram-bot
 pygsheets
 gunicorn
+gspread
