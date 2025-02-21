@@ -13,10 +13,10 @@ from datetime import datetime
 app = Flask(__name__)
 
 # Telegram Bot Token (set via environment variable later)
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("7547277714:AAHFM9KGXnFFbjXrfchOc8WTkMAn8MnHInc")
 
 # Google Sheets Setup
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+scope = ["https://docs.google.com/spreadsheets/d/1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0/edit?usp=sharing"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(
     eval(os.getenv("GOOGLE_CREDENTIALS")), scope
 )
