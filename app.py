@@ -23,6 +23,7 @@ app = Quart(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 SHEET_ID = os.environ.get("SHEET_ID")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+SELF_PING_URL = os.environ.get("SELF_PING_URL")  # e.g. "https://<your-app>.onrender.com/"
 
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
@@ -34,7 +35,7 @@ if not GOOGLE_API_KEY:
     logger.error("GOOGLE_API_KEY is not set. Bot cannot start.")
     raise ValueError("GOOGLE_API_KEY environment variable is required.")
 
-# Google Sheets Setup (public sheet, but API key is required)
+# Google Sheets Setup (public sheet; API key is required)
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Conversation States
@@ -60,7 +61,7 @@ WELCOME_TEXT = (
     "Please enter the password to proceed."
 )
 
-# Helper function: convert a column number to an Excel-style letter
+# Helper: convert a column number to an Excel-style letter
 def col_to_letter(n):
     result = ""
     while n > 0:
@@ -68,7 +69,7 @@ def col_to_letter(n):
         result = chr(65 + remainder) + result
     return result
 
-# Asynchronous helper functions for Google Sheets API with API key authentication
+# Google Sheets API helper functions (using API key)
 async def append_row(values):
     url = f"{BASE_URL}/Sheet1!A1:G1:append?valueInputOption=RAW&key={GOOGLE_API_KEY}"
     async with aiohttp.ClientSession() as session:
@@ -377,12 +378,28 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-# Quart startup hook: Initialize the Telegram Application and log bot details
+# Self-pinging background task to keep the instance awake
+async def self_ping():
+    # Use SELF_PING_URL if set, else default to localhost (this might not work if the instance is spun down)
+    url = SELF_PING_URL or f"http://localhost:{os.environ.get('PORT', 5000)}/"
+    logger.info("Starting self-ping on URL: %s", url)
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    text = await response.text()
+                    logger.debug("Self-ping successful, response: %s", text)
+        except Exception as e:
+            logger.error("Self-ping failed: %s", e)
+        await asyncio.sleep(300)  # Ping every 5 minutes
+
+# Quart startup hook: Initialize the Telegram Application, start self-pinging, and log bot details
 @app.before_serving
-async def init_telegram_app():
+async def startup():
     await application.initialize()
     bot_me = await application.bot.get_me()
     logger.info("Telegram Application initialized. Bot info: %s", bot_me)
+    app.add_background_task(self_ping)
 
 # Webhook endpoint for Telegram updates
 @app.route('/webhook', methods=['POST'])
