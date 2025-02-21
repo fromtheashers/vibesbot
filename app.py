@@ -6,22 +6,18 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, Filters, ContextTypes
 )
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
 
+import pygsheets
+from datetime import datetime
 app = Flask(__name__)
 
 # Telegram Bot Token (set via environment variable later)
-TOKEN = os.getenv("7547277714:AAHFM9KGXnFFbjXrfchOc8WTkMAn8MnHInc")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Google Sheets Setup
-scope = ["https://docs.google.com/spreadsheets/d/1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0/edit?usp=sharing"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(
-    eval(os.getenv("GOOGLE_CREDENTIALS")), scope
-)
-client = gspread.authorize(creds)
-sheet = client.open("VibeData").sheet1
+# Google Sheets Setup (No Service Account, Public Link)
+SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
+gc = pygsheets.authorize(service_file=None)  # No credentials needed for public edit
+sheet = gc.open_by_key(SHEET_ID).sheet1
 
 # Conversation States
 (ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
