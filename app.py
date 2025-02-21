@@ -329,6 +329,11 @@ def home():
 
 # Bot Application
 application = Application.builder().token(TOKEN).build()
+
+# testing
+application.add_handler(CommandHandler("start", start))
+# testing
+
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
