@@ -10,7 +10,6 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 from datetime import datetime
-from quart import before_serving
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -77,11 +76,21 @@ def update_cell(row, col, value):
 # Build the Application
 application = Application.builder().token(TOKEN).build()
 
-# Initialize the Application before serving
-@before_serving
+# Initialize the Application before the first request
+@app.before_first_request
 async def initialize_app():
-    await application.initialize()
-    logger.info("Application initialized successfully")
+    try:
+        await application.initialize()
+        logger.info("Application initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize application: {e}")
+        raise
+
+# Error handler for Quart
+@app.errorhandler(Exception)
+async def handle_exception(e):
+    logger.error(f"Unhandled exception: {e}")
+    return "Internal Server Error", 500
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -323,7 +332,8 @@ conv_handler = ConversationHandler(
         ASK_NEW_VALUE: [CallbackQueryHandler(ask_new_value)],
         CONFIRM_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_edit)],
     },
-    fallbacks=[CommandHandler("cancel", cancel)]
+    fallbacks=[CommandHandler("cancel", cancel)],
+    per_message=True  # Ensure CallbackQueryHandler tracks every message
 )
 application.add_handler(conv_handler)
 
