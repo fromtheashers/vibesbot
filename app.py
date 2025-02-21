@@ -35,7 +35,7 @@ if not SHEET_ID:
 # Google Sheets Setup (public sheet, so no auth is added)
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
-# Conversation States (removed unused ASK_FIELD_TO_EDIT)
+# Conversation States (unused state removed)
 (ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
  ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
  ASK_NEW_VALUE, CONFIRM_EDIT) = range(14)
@@ -368,7 +368,8 @@ async def show_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         all_data = await get_all_values()
     except Exception as e:
         logger.error("Error retrieving data for rankings: %s", e)
-        await update.callback_query.edit_message_text("Error retrieving data.")
+        if update.callback_query:
+            await update.callback_query.edit_message_text("Error retrieving data.")
         return
     # Skip header row
     all_data = all_data[1:]
@@ -407,7 +408,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# Add handlers before initialization
+# Add conversation handler to Telegram Application
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
@@ -431,29 +432,13 @@ conv_handler = ConversationHandler(
 )
 application.add_handler(conv_handler)
 
-# Asynchronous startup function
-async def startup():
-    logger.info("Initializing application...")
-    try:
-        await application.initialize()
-        logger.info("Application initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize application: {e}")
-        raise
+# Quart startup hook: Initialize the Telegram Application before serving requests
+@app.before_serving
+async def init_telegram_app():
+    await application.initialize()
+    logger.info("Telegram Application initialized successfully via Quart startup.")
 
-# Override Quart's run method to include startup
-async def run_with_startup():
-    await startup()
-    logger.info("Starting the application")
-    await app.run_task(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-# Error handler for Quart
-@app.errorhandler(Exception)
-async def handle_exception(e):
-    logger.error(f"Unhandled exception: {e}")
-    return "Internal Server Error", 500
-
-# Webhook endpoint
+# Webhook endpoint for Telegram updates
 @app.route('/webhook', methods=['POST'])
 async def webhook():
     logger.info("Webhook received a request")
@@ -469,5 +454,7 @@ async def webhook():
 async def home():
     return "Bot is running"
 
+# For local development, you can run the Quart app with:
 if __name__ == "__main__":
-    asyncio.run(run_with_startup())
+    # Running on port 5000 by default, change if needed
+    asyncio.run(app.run_task(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))))
