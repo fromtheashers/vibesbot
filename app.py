@@ -74,10 +74,10 @@ def update_cell(row, col, value):
     if response.status_code != 200:
         raise Exception(f"Failed to update cell: {response.text}")
 
-# Build the Application
+# Build and initialize the Application
 application = Application.builder().token(TOKEN).build()
 
-# Initialize the Application at startup
+# Synchronous initialization at startup
 async def initialize_app():
     try:
         await application.initialize()
@@ -86,9 +86,9 @@ async def initialize_app():
         logger.error(f"Failed to initialize application: {e}")
         raise
 
-# Start initialization as a task
-loop = asyncio.get_event_loop()
-loop.create_task(initialize_app())
+# Run initialization synchronously before starting the server
+logger.info("Initializing application...")
+asyncio.run(initialize_app())
 
 # Error handler for Quart
 @app.errorhandler(Exception)
