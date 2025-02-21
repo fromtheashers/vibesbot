@@ -39,6 +39,16 @@ if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
 
+# Create and set the event loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+# Initialize the Application with the correct loop
+application = Application.builder().token(TOKEN).build()
+
+# Start the event loop in a separate thread
+threading.Thread(target=loop.run_forever, daemon=True).start()
+
 # Google Sheets Setup
 SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
 BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
@@ -319,22 +329,15 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.info("Webhook received a request")
-    update = Update.de_json(request.get_json(force=True), application.bot)  # Fixed import
-    update_json = request.get_json(force=True)  # Get the raw JSON from Telegram
-    logger.debug(f"Incoming update: {json.dumps(update_json)}")  # Log the JSON, serialized for safety
+    update_json = request.get_json(force=True)
+    logger.debug(f"Incoming update: {json.dumps(update_json)}")
+    update = Update.de_json(update_json, application.bot)
     asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
-    return "OK"
+    return '', 200
 
 @app.route('/')
 def home():
     return "Bot is running"
-
-# Bot Application
-application = Application.builder().token(TOKEN).build()
-
-# testing
-application.add_handler(CommandHandler("start", start))
-# testing
 
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
