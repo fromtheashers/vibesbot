@@ -26,15 +26,6 @@ app = Flask(__name__)
 
 YOUR_CHAT_ID = 29612237  # Replace with your actual chat_id
 
-async def send_startup_message():
-    try:
-        await application.bot.send_message(chat_id=YOUR_CHAT_ID, text="Bot started successfully")
-        logger.info("Startup message sent")
-    except Exception as e:
-        logger.error(f"Failed to send startup message: {e}")
-
-asyncio.run_coroutine_threadsafe(send_startup_message(), loop)
-
 # Log environment variables at startup
 logger.info("Starting app...")
 logger.info(f"TELEGRAM_TOKEN: {os.getenv('TELEGRAM_TOKEN')}")
@@ -358,6 +349,15 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel)]
 )
 application.add_handler(conv_handler)
+
+async def send_startup_message():
+    try:
+        await application.bot.send_message(chat_id=YOUR_CHAT_ID, text="Bot started successfully")
+        logger.info("Startup message sent")
+    except Exception as e:
+        logger.error(f"Failed to send startup message: {e}")
+
+asyncio.run_coroutine_threadsafe(send_startup_message(), loop)
 
 if __name__ == "__main__":
     logger.info("Starting the application")
