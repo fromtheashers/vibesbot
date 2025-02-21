@@ -1,38 +1,56 @@
 import os
 import re
+import json
+import requests
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
-    ConversationHandler, MessageHandler, ContextTypes,
-    filters
+    ConversationHandler, MessageHandler, ContextTypes, filters
 )
-
-import gspread
 from datetime import datetime
+
 app = Flask(__name__)
 
-# Telegram Bot Token (set via environment variable later)
+# Telegram Bot Token (set via environment variable)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Google Sheets Setup (Publicly editable sheet, no credentials)
 SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
-gc = gspread.Client(None)  # No authentication for public sheet
-sheet = gc.open_by_key(SHEET_ID).sheet1
+BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
+
+# Helper functions for Google Sheets API
+def append_row(values):
+    url = f"{BASE_URL}/Sheet1!A1:G1:append?valueInputOption=RAW"
+    response = requests.post(url, json={"values": [values]})
+    if response.status_code != 200:
+        raise Exception(f"Failed to append row: {response.text}")
+
+def get_all_values():
+    url = f"{BASE_URL}/Sheet1!A:G"
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to get data: {response.text}")
+    data = response.json().get("values", [])
+    return data
+
+def update_cell(row, col, value):
+    url = f"{BASE_URL}/Sheet1!{chr(64 + col)}{row}"
+    response = requests.put(url, json={"values": [[value]]}, params={"valueInputOption": "RAW"})
+    if response.status_code != 200:
+        raise Exception(f"Failed to update cell: {response.text}")
 
 # Conversation States
-(ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
- ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
- ASK_FIELD_TO_EDIT, ASK_NEW_VALUE, CONFIRM_EDIT) = range(15)
+(ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO, 
+ ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA, 
+ ASK_FIELD_TO_EDIT, ASK_NEW_VALUE, CONFIRM_EDIT) = range(14)
 
 # Inline Keyboards
 SCORE_BUTTONS = [[InlineKeyboardButton(str(i), callback_data=str(i)) for i in range(1, 6)]]
 VIBE_BUTTONS = [
-    [InlineKeyboardButton("Good", callback_data="good"),
+    [InlineKeyboardButton("Good", callback_data="good"), 
      InlineKeyboardButton("Bad", callback_data="bad")]
 ]
-
-# Main Menu
 MAIN_MENU = [
     [InlineKeyboardButton("Input Vibe Data", callback_data="input")],
     [InlineKeyboardButton("Edit Vibe Data", callback_data="edit")],
@@ -148,8 +166,8 @@ async def ask_vibe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() == "yes":
         data = context.user_data["vibe_data"]
-        sheet.append_row([data["name"], data["date"], data["food"], data["place"],
-                          data["spaciousness"], data["convo"], data["vibe"]])
+        append_row([data["name"], data["date"], data["food"], data["place"], 
+                    data["spaciousness"], data["convo"], data["vibe"]])
         await update.message.reply_text("Data saved!", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
     else:
         await update.message.reply_text("Input canceled.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
@@ -180,7 +198,7 @@ async def ask_date_for_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
 def find_row(name, date):
-    all_data = sheet.get_all_values()[1:]  # Skip header
+    all_data = get_all_values()[1:]  # Skip header
     for i, row in enumerate(all_data, 2):
         if row[0] == name and row[1] == date:
             return {"index": i, "data": row}
@@ -195,7 +213,7 @@ async def show_current_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = update.message.text.lower()
     context.user_data["field_to_edit"] = field
     if field in ["food", "place", "spaciousness", "convo"]:
-        await update.message.reply_text(f"Enter new score for {field.capitalize()} (1-5):",
+        await update.message.reply_text(f"Enter new score for {field.capitalize()} (1-5):", 
                                         reply_markup=InlineKeyboardMarkup(SCORE_BUTTONS))
         return ASK_NEW_VALUE
     elif field == "vibe":
@@ -219,7 +237,7 @@ async def confirm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         field = context.user_data["field_to_edit"]
         new_value = context.user_data["new_value"]
         col_map = {"food": 3, "place": 4, "spaciousness": 5, "convo": 6, "vibe": 7}
-        sheet.update_cell(row["index"], col_map[field], new_value)
+        update_cell(row["index"], col_map[field], new_value)
         await update.message.reply_text("Data updated!", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
     else:
         await update.message.reply_text("Edit canceled.", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
@@ -228,7 +246,7 @@ async def confirm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Rankings
 async def show_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    all_data = sheet.get_all_values()[1:]  # Skip header
+    all_data = get_all_values()[1:]  # Skip header
     good_vibes = [row for row in all_data if row[6] == "good"]
     bad_vibes = [row for row in all_data if row[6] == "bad"]
 
@@ -258,7 +276,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Flask Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
+    update = Update.de_json(request.get_json(force=True), application.bot)
     application.process_update(update)
     return "OK"
 
@@ -267,19 +285,19 @@ application = Application.builder().token(TOKEN).build()
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
-        ASK_NAME: [MessageHandler(Filters.text & ~Filters.command, ask_name)],
-        ASK_DATE: [MessageHandler(Filters.text & ~Filters.command, ask_date)],
+        ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
+        ASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date)],
         ASK_FOOD: [CallbackQueryHandler(ask_food)],
         ASK_PLACE: [CallbackQueryHandler(ask_place)],
         ASK_SPACIOUSNESS: [CallbackQueryHandler(ask_spaciousness)],
         ASK_CONVO: [CallbackQueryHandler(ask_convo)],
         ASK_VIBE: [CallbackQueryHandler(ask_vibe)],
-        CONFIRM: [MessageHandler(Filters.text & ~Filters.command, confirm)],
-        ASK_NAME_FOR_EDIT: [MessageHandler(Filters.text & ~Filters.command, ask_name_for_edit)],
-        ASK_DATE_FOR_EDIT: [MessageHandler(Filters.text & ~Filters.command, ask_date_for_edit)],
-        SHOW_CURRENT_DATA: [MessageHandler(Filters.text & ~Filters.command, show_current_data)],
+        CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm)],
+        ASK_NAME_FOR_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name_for_edit)],
+        ASK_DATE_FOR_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_date_for_edit)],
+        SHOW_CURRENT_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, show_current_data)],
         ASK_NEW_VALUE: [CallbackQueryHandler(ask_new_value)],
-        CONFIRM_EDIT: [MessageHandler(Filters.text & ~Filters.command, confirm_edit)],
+        CONFIRM_EDIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_edit)],
     },
     fallbacks=[CommandHandler("cancel", cancel)]
 )
