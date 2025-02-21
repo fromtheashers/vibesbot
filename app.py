@@ -10,6 +10,7 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 from datetime import datetime
+from quart import before_serving
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -72,6 +73,15 @@ def update_cell(row, col, value):
     response = requests.put(url, json={"values": [[value]]}, params={"valueInputOption": "RAW"})
     if response.status_code != 200:
         raise Exception(f"Failed to update cell: {response.text}")
+
+# Build the Application
+application = Application.builder().token(TOKEN).build()
+
+# Initialize the Application before serving
+@before_serving
+async def initialize_app():
+    await application.initialize()
+    logger.info("Application initialized successfully")
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -293,18 +303,6 @@ async def webhook():
 @app.route('/')
 async def home():
     return "Bot is running"
-
-# Build and initialize the Application
-application = Application.builder().token(TOKEN).build()
-
-# Initialize the Application asynchronously
-async def initialize_app():
-    await application.initialize()
-    logger.info("Application initialized successfully")
-
-# Run initialization
-import asyncio
-asyncio.run(initialize_app())
 
 # Add handlers after initialization
 conv_handler = ConversationHandler(
