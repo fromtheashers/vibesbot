@@ -294,8 +294,19 @@ async def webhook():
 async def home():
     return "Bot is running"
 
-# Build the Application and add handlers
+# Build and initialize the Application
 application = Application.builder().token(TOKEN).build()
+
+# Initialize the Application asynchronously
+async def initialize_app():
+    await application.initialize()
+    logger.info("Application initialized successfully")
+
+# Run initialization
+import asyncio
+asyncio.run(initialize_app())
+
+# Add handlers after initialization
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start), CallbackQueryHandler(button)],
     states={
