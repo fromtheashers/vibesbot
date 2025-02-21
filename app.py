@@ -1,17 +1,21 @@
 import os
 import re
 import json
-import asyncio
-import logging
-import threading
 import requests
+import threading
+import logging
+import asyncio
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup  # Updated import
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, 
+    Application, CommandHandler, CallbackQueryHandler,
     ConversationHandler, MessageHandler, ContextTypes, filters
 )
 from datetime import datetime
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Start the event loop in a separate thread
 loop = asyncio.new_event_loop()
@@ -19,10 +23,6 @@ asyncio.set_event_loop(loop)
 threading.Thread(target=loop.run_forever, daemon=True).start()
 
 app = Flask(__name__)
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 # Log environment variables at startup
 logger.info("Starting app...")
@@ -36,6 +36,10 @@ RENDER_URL = os.environ.get('RENDER_URL', "http://localhost:5000")  # Fallback f
 if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set. Bot cannot start.")
     raise ValueError("TELEGRAM_TOKEN environment variable is required.")
+
+# Google Sheets Setup
+SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
+BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Keep-alive function with error handling
 def keep_alive():
@@ -52,10 +56,6 @@ def keep_alive():
 
 # Start keep-alive in a separate thread
 threading.Thread(target=keep_alive, daemon=True).start()
-
-# Google Sheets Setup (Publicly editable sheet, no credentials)
-SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
-BASE_URL = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values"
 
 # Helper functions for Google Sheets API
 def append_row(values):
@@ -79,21 +79,22 @@ def update_cell(row, col, value):
         raise Exception(f"Failed to update cell: {response.text}")
 
 # Conversation States
-(ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO, 
- ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA, 
- ASK_FIELD_TO_EDIT, ASK_NEW_VALUE, CONFIRM_EDIT) = range(14)
+(ASK_PASSWORD, ASK_NAME, ASK_DATE, ASK_FOOD, ASK_PLACE, ASK_SPACIOUSNESS, ASK_CONVO,
+ ASK_VIBE, CONFIRM, ASK_NAME_FOR_EDIT, ASK_DATE_FOR_EDIT, SHOW_CURRENT_DATA,
+ ASK_FIELD_TO_EDIT, ASK_NEW_VALUE, CONFIRM_EDIT) = range(15)
 
 # Inline Keyboards
 SCORE_BUTTONS = [[InlineKeyboardButton(str(i), callback_data=str(i)) for i in range(1, 6)]]
 VIBE_BUTTONS = [
-    [InlineKeyboardButton("Good", callback_data="good"), 
+    [InlineKeyboardButton("Good", callback_data="good"),
      InlineKeyboardButton("Bad", callback_data="bad")]
 ]
+
 MAIN_MENU = [
-    [InlineKeyboardButton("Input Vibe Data", callback_data="input")],
-    [InlineKeyboardButton("Edit Vibe Data", callback_data="edit")],
-    [InlineKeyboardButton("View Current Rankings", callback_data="rankings")]
-]
+        [InlineKeyboardButton("Input Vibe Data", callback_data="input")],
+        [InlineKeyboardButton("Edit Vibe Data", callback_data="edit")],
+        [InlineKeyboardButton("View Current Rankings", callback_data="rankings")]
+    ]
 
 WELCOME_TEXT = (
     "Welcome to GoodVibesBot! 🎉\n"
@@ -205,7 +206,7 @@ async def ask_vibe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.lower() == "yes":
         data = context.user_data["vibe_data"]
-        append_row([data["name"], data["date"], data["food"], data["place"], 
+        append_row([data["name"], data["date"], data["food"], data["place"],
                     data["spaciousness"], data["convo"], data["vibe"]])
         await update.message.reply_text("Data saved!", reply_markup=InlineKeyboardMarkup(MAIN_MENU))
     else:
@@ -252,7 +253,7 @@ async def show_current_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = update.message.text.lower()
     context.user_data["field_to_edit"] = field
     if field in ["food", "place", "spaciousness", "convo"]:
-        await update.message.reply_text(f"Enter new score for {field.capitalize()} (1-5):", 
+        await update.message.reply_text(f"Enter new score for {field.capitalize()} (1-5):",
                                         reply_markup=InlineKeyboardMarkup(SCORE_BUTTONS))
         return ASK_NEW_VALUE
     elif field == "vibe":
@@ -316,11 +317,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.info("Webhook received a request")
-    update = telegram.Update.de_json(request.get_json(force=True), application.bot)
+    update = Update.de_json(request.get_json(force=True), application.bot)  # Fixed import
     asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
     return "OK"
 
-# testing
 @app.route('/')
 def home():
     return "Bot is running"
@@ -349,4 +349,5 @@ conv_handler = ConversationHandler(
 application.add_handler(conv_handler)
 
 if __name__ == "__main__":
+    logger.info("Starting the application")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
