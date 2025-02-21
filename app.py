@@ -8,16 +8,16 @@ from telegram.ext import (
     filters
 )
 
-import pygsheets
+import gspread
 from datetime import datetime
 app = Flask(__name__)
 
 # Telegram Bot Token (set via environment variable later)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Google Sheets Setup (No Service Account, Public Link)
+# Google Sheets Setup (Publicly editable sheet, no credentials)
 SHEET_ID = "1uOl8diQh5ic9iqHjsq_ohyKp2fo4GAEzBhyIfZBPfF0"  # Replace with your SHEET_ID
-gc = pygsheets.authorize(service_file=None)  # No credentials needed for public edit
+gc = gspread.Client(None)  # No authentication for public sheet
 sheet = gc.open_by_key(SHEET_ID).sheet1
 
 # Conversation States
